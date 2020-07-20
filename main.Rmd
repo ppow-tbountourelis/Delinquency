@@ -1,0 +1,447 @@
+---
+title: "On the Prediction of Deliquencies"
+output:
+  html_document:
+    number_sections: yes
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+This is an R Markdown document. 
+
+
+# Libraries
+
+```{r libraries, echo=TRUE,  warning=FALSE, message=FALSE}
+source("db.R")
+library(smbinning)
+library(InformationValue)
+library(randomForest)
+set.seed = 1
+```
+
+# Read Data
+
+The training data are read from a view called "v_mart_delinquency_train" into a csv file.
+
+```{r pressure, echo=TRUE}
+data <- read.csv(file = "v_mart_delinquency_train.csv")
+data <- as.data.frame(unclass(data), stringsAsFactors=TRUE) # Make strings factors
+data$ORDER_DT_HOUR <- as.factor(data$ORDER_DT_HOUR)
+data$ORDER_DT_MONTH <- as.factor(data$ORDER_DT_MONTH)
+```
+
+# Creating Training and Test sets
+
+Create train (70%) and testing (30%) tests. 
+
+```{r sss, echo=TRUE}
+# Create Training Data
+input_ones <- data[which(data$OUTCOME == 1), ]  # all 1's
+input_zeros <-data[which(data$OUTCOME == 0), ]  # all 0's
+# Create Test Data
+input_ones_train_rows  <- sample(1:nrow(input_ones), 0.7 * nrow(input_ones))  # 1's for training
+input_zeros_train_rows <- sample(1:nrow(input_zeros), 0.7 * nrow(input_zeros))  # 0's for training. Pick as many 0's as 1's
+# 
+training_ones <- input_ones[input_ones_train_rows, ]  
+training_zeros <- input_zeros[input_zeros_train_rows, ]
+data_train <- rbind(training_ones, training_zeros) 
+# 
+test_ones <- input_ones[-input_ones_train_rows, ]
+test_zeros <- input_zeros[-input_zeros_train_rows, ]
+data_test <- rbind(test_ones, test_zeros)  
+```
+
+\pagebreak
+
+# Calculating the Information Value (IV) of Independent Variables
+
+In this section we calculate the IV of each independent variable. The IV is a measure of the relationship between an independent and the dependent variable. As a rule of thumb, independent variables with an IV less than 0.02 are ignored. We calculate the corresponding IVs using the smbinning package.
+
+We store the IV of all variables into df.iv.
+
+```{r IV2, echo=TRUE}
+df.iv <- data.frame(Var=as.character(), IV=as.numeric())
+lst.smb <- list()
+```
+
+\pagebreak
+
+## Order Attributes
+
+In this section we calculate the IV of Order attributes. 
+
+### Product Type
+
+A particular order may have multiple products. Products can be categorized to (i) Departments (Dept), (ii) Classes (Class), and (iii) Subclasses (Subclass).We review the IV of each of these attributes. We first look at the Product Department. The column DEPT_WOA contains the Weight of Evidence (WoE) for each department. The column DEPT_VAL contains the average deliquency for each department.
+
+```{r IV3, echo=TRUE}
+var   <- 'WOE_DEPT'
+smb   <- smbinning(data_train, y="OUTCOME", x=var)
+df.iv <- rbind(df.iv, data.frame(Var=var, IV=smb$iv))
+smb$iv
+
+#var_bin <- paste(var, "_SMBIN", sep = "")
+#smb     <- smbinning(data_train, y="OUTCOME", x=var)
+#df.iv   <- rbind(df.iv, data.frame(Var=var, IV=smb$iv))
+#data_train <- smbinning.gen(data_train, smb, chrname = var_bin)
+#data_test  <- smbinning.gen(data_test , smb, chrname = var_bin)
+```
+
+We repeat the same exercise for class.
+
+```{r IV4, echo=TRUE}
+var <- 'WOE_CLASS'
+smb <- smbinning(data_train, y="OUTCOME", x=var)
+df.iv <- rbind(df.iv, data.frame(Var=var, IV=smb$iv))
+smb$iv
+```
+
+We repeat the same exercise for Subclass.
+
+```{r IV5, echo=TRUE}
+var = 'WOE_SUBCLASS'
+smb <- smbinning(data_train, y="OUTCOME", x=var)
+df.iv <- rbind(df.iv, data.frame(Var=var, IV=smb$iv))
+smb$iv
+
+```
+
+### Order Value
+
+```{r IV77675735, echo=TRUE}
+var <- 'DEM'
+smb <- smbinning(data_train, y="OUTCOME", x=var, p = 0.05)
+lst.smb[[var]] <- smb
+smb$ctree
+smb$iv
+smb$ivtable[, c("Cutpoint", "WoE")]
+
+var_bin <- paste(var, "_SMBIN", sep = "")
+df.iv <- rbind(df.iv, data.frame(Var=var, IV=smb$iv))
+data_train <- smbinning.gen(data_train, smb, chrname = var_bin)
+data_test  <- smbinning.gen(data_test , smb, chrname = var_bin)
+```
+
+
+### Discount
+
+The variable DIS represent the % of discount applied to the order. We perform a form of supervised binning as follows:
+
+```{r IV75, echo=TRUE}
+var <- 'DIS'
+smb <- smbinning(data_train, y="OUTCOME", x=var)
+lst.smb[[var]] <- smb
+smb$ctree
+smb$iv
+smb$ivtable[, c("Cutpoint", "WoE")]
+
+var_bin <- paste(var, "_SMBIN", sep = "")
+df.iv <- rbind(df.iv, data.frame(Var=var, IV=smb$iv))
+data_train <- smbinning.gen(data_train, smb, chrname = var_bin)
+data_test  <- smbinning.gen(data_test , smb, chrname = var_bin)
+```
+
+### Order Ship Type
+
+```{r IV8, echo=TRUE}
+var <- 'SHIPTYPE'
+smb <- smbinning.factor(data_train, y="OUTCOME", x=var)
+lst.smb[[var]] <- smb
+df.iv <- rbind(df.iv, data.frame(Var=var, IV=smb$iv))
+smb$iv
+```
+
+### Time
+
+```{r IV9, echo=TRUE}
+var = 'ORDER_DT_HOUR'
+smb <- smbinning.factor(data_train, y="OUTCOME", x=var, maxcat = 50)
+df.iv <- rbind(df.iv, data.frame(Var=var, IV=smb$iv))
+smb$iv
+
+var = 'ORDER_DT_MONTH'
+smb <- smbinning.factor(data_train, y="OUTCOME", x=var, maxcat = 50)
+df.iv <- rbind(df.iv, data.frame(Var=var, IV=smb$iv))
+smb$ctree
+smb$iv
+```
+
+\pagebreak
+
+## Buyer Attributes
+
+In this section we calculate the IV of Buyer attributes. 
+
+### Time between Registration and First Purchase
+
+```{r IV10, echo=TRUE}
+var = 'MONTHS_SINCE_REG'
+smb <- smbinning(data_train, y="OUTCOME", x=var)
+lst.smb[[var]] <- smb
+smb$iv
+smb$ivtable[, c("Cutpoint", "WoE")]
+
+var_bin <- paste(var, "_SMBIN", sep = "")
+df.iv <- rbind(df.iv, data.frame(Var=var, IV=smb$iv))
+data_train <- smbinning.gen(data_train, smb, chrname = var_bin)
+data_test  <- smbinning.gen(data_test , smb, chrname = var_bin)
+
+```
+
+### Geography
+
+```{r IV11, echo=TRUE}
+var <- 'WOE_STATE'
+smb <- smbinning(data_train, y="OUTCOME", x=var)
+lst.smb[[var]] <- smb
+smb$iv
+smb$ctree
+smb$ivtable[, c("Cutpoint", "WoE")]
+
+var_bin <- paste(var, "_SMBIN", sep = "")
+df.iv <- rbind(df.iv, data.frame(Var=var, IV=smb$iv))
+data_train <- smbinning.gen(data_train, smb, chrname = var_bin)
+data_test  <- smbinning.gen(data_test , smb, chrname = var_bin)
+```
+
+### UserGroup
+
+```{r IV12, echo=TRUE}
+var <- 'USERGROUP'
+smb <- smbinning.factor(data_train, y="OUTCOME", x=var, maxcat = 100)
+lst.smb[[var]] <- smb
+smb$iv
+smb$ivtable[, c("Cutpoint", "WoE")]
+
+#var <- 'USERGROUP_WOA'
+#smb <- smbinning(data_train, y="OUTCOME", x=var)
+#smb$iv
+#smb$ctree
+
+df.iv <- rbind(df.iv, data.frame(Var=var, IV=smb$iv))
+```
+
+### Days since Customer Launch
+
+```{r IV1434231423, echo=TRUE}
+var <- 'DAYS_SINCE_LAUNCH'
+smb <- smbinning(data_train, y="OUTCOME", x=var)
+lst.smb[[var]] <- smb
+smb$iv
+smb$ctree
+
+var_bin <- paste(var, "_SMBIN", sep = "")
+df.iv <- rbind(df.iv, data.frame(Var=var, IV=smb$iv))
+data_train <- smbinning.gen(data_train, smb, chrname = var_bin)
+data_test  <- smbinning.gen(data_test , smb, chrname = var_bin)
+```
+
+### Days since Customer Launch
+
+```{r IV143442323, echo=TRUE}
+var <- 'TENURE'
+smb <- smbinning(data_train, y="OUTCOME", x=var)
+lst.smb[[var]] <- smb
+smb$iv
+smb$ctree
+smb$ivtable[,c("Cutpoint", "WoE")]
+
+df.iv <- rbind(df.iv, data.frame(Var=var, IV=smb$iv))
+var_bin <- paste(var, "_SMBIN", sep = "")
+data_train <- smbinning.gen(data_train, smb, chrname = var_bin)
+data_test  <- smbinning.gen(data_test , smb, chrname = var_bin)
+```
+
+
+### Client Eligibles
+
+```{r IV1408749, echo=TRUE}
+var <- 'ELIGIBLES'
+smb <- smbinning(data_train, y="OUTCOME", x=var)
+lst.smb[[var]] <- smb
+smb$iv
+smb$ctree
+smb$ivtable[,c("Cutpoint", "WoE")]
+
+var_bin <- paste(var, "_SMBIN", sep = "")
+df.iv <- rbind(df.iv, data.frame(Var=var, IV=smb$iv))
+data_train <- smbinning.gen(data_train, smb, chrname = var_bin)
+data_test  <- smbinning.gen(data_test , smb, chrname = var_bin)
+```
+
+
+### Verified Salary
+
+```{r IV140834279, echo=TRUE}
+var = 'VERIFIEDSALARY'
+smb <- smbinning(data_train, y="OUTCOME", x=var)
+lst.smb[[var]] <- smb
+smb$iv
+smb$ctree
+smb$ivtable[,c("Cutpoint", "WoE")]
+
+var_bin <- paste(var, "_SMBIN", sep = "")
+df.iv <- rbind(df.iv, data.frame(Var=var, IV=smb$iv))
+data_train <- smbinning.gen(data_train, smb, chrname = var_bin)
+data_test  <- smbinning.gen(data_test , smb, chrname = var_bin)
+```
+
+
+## Ordering Attributes
+
+```{r IV12958479521, echo=TRUE}
+df.iv <- df.iv[order(-df.iv$IV),]
+df.iv
+```
+
+
+# A Logistic Regression Model
+
+```{r IV1231, echo=TRUE}
+models <- list()
+
+logitMod <- glm(OUTCOME ~ ORDER_DT_MONTH + 
+                          WOE_DEPT +
+                          WOE_CLASS +
+                          WOE_DEM + 
+                          WOE_DIS +
+                          WOE_MONTHS_SINCE_REG +
+                          WOE_STATE +
+                          USERGROUP +
+                          WOE_ELIGIBLES +
+                          VERIFIEDSALARY_SMBIN +
+                          TENURE_SMBIN
+                          , 
+                data=data_train, 
+                family=binomial(link="logit")
+                )
+
+logitMod <- glm(OUTCOME ~ ORDER_DT_MONTH + 
+                          WOE_DEPT +
+                          WOE_CLASS +
+                          DEM_SMBIN + 
+                          DIS_SMBIN +
+                          MONTHS_SINCE_REG_SMBIN +
+                          WOE_STATE_SMBIN +
+                          USERGROUP +
+                          ELIGIBLES_SMBIN +
+                          VERIFIEDSALARY_SMBIN +
+                          TENURE_SMBIN
+                          , 
+                data=data_train, 
+                family=binomial(link="logit")
+                )
+
+models[["Orders"]] <- glm(OUTCOME ~ ORDER_DT_MONTH + 
+                          WOE_DEPT +
+                          WOE_CLASS +
+                          WOE_BIN_DEM + 
+                          WOE_BIN_DIS +
+                          WOE_BIN_MONTHS_SINCE_REG +
+                          WOE_BIN_STATE +
+                          USERGROUP +
+                          WOE_BIN_VERIFIEDSALARY +
+                          WOE_BIN_TENURE 
+                          , 
+                data=data_train, 
+                family=binomial(link="logit")
+                )
+logitMod <- models[["Orders"]]
+summary(logitMod)
+data_test$predicted <- predict(logitMod, data_test, type="response")  # predicted scores
+
+plotROC(data_test$OUTCOME, data_test$predicted)
+```
+
+
+```{r IV12356343533, echo=TRUE}
+plot(sort(data_test$predicted))
+```
+
+
+## Validation
+
+```{r IV12335633, echo=TRUE}
+df <- data.frame(OUTCOME=data_test$OUTCOME, predicted=data_test$predicted) 
+b <- seq(0, 1, 0.05)
+df$Bins <- cut(df$predicted, breaks = b)
+
+df.aggr.1 <- aggregate(df$OUTCOME, by=list(df$Bins), FUN = mean)
+df.aggr.2 <- aggregate(df$OUTCOME, by=list(df$Bins), FUN = length)
+```
+
+How many orders do we capture for scores above 35%?
+
+```{r IV1234432633, echo=TRUE}
+v <- df.aggr.1$x * df.aggr.2$x
+df.aggr.1$v <- v/sum(v)
+df.aggr.1
+
+i <- as.character(df.aggr.1$Group.1) >= "(0.35,"
+sum(df.aggr.1[i,]$v)
+```
+
+# Is the Model Useful?
+
+For the model to be useful there must be a threshold above which the cancellation of orders will result in a net benefit.
+
+Each order has the following components: (i) Original Balance (BAL), (ii) Balance Paid (PAID), and (iii) Product Cost (COST). An order revenue can be expressed as PAID - COST. Generally, and ignoring additional costs, an order has a negative impact of PAID < COST.
+
+Therefore, a model can be useful if orders above a certain threshold sum up to a negative order revenue.
+
+```{r useful1}
+i <- !is.na(data_test$APPLIED) & !is.na(data_test$COST) & !is.na(data_test$predicted) & data_test$predicted >= 0.50
+sum(data_test[i,]$APPLIED) / sum(1.1*data_test[i,]$COST)
+```
+
+Net Margin of these orders
+
+```{r useful2}
+ (sum(data_test[i,]$ORIGINAL) - 1.1*sum(data_test[i,]$COST))/sum(data_test[i,]$ORIGINAL)
+```
+
+Total Net Margin 
+
+```{r useful3}
+ (sum(data_test$ORIGINAL) - 1.1*sum(data_test$COST))/sum(data_test$ORIGINAL)
+```
+
+
+```{r IV1234ew5633, echo=TRUE}
+i <- !is.na(data_test$predicted) & data_test$predicted >= 0.50
+sum(i)
+sum(i)/length(i)
+```
+
+
+# A Logistic Regression Model for Buyers
+
+```{r IV127767531, echo=TRUE}
+i <- data_train$NEW_CHANNEL == 'Affiliate'
+models[["Registrants"]] <- glm(OUTCOME ~  #WOE_BIN_STATE +
+                                          WOE_USERGROUP +
+                                          WOE_BIN_MONTHS_SINCE_REG +
+                                          WOE_ELIGIBLES +
+                                          WOE_BIN_VERIFIEDSALARY +
+                                          WOE_BIN_TENURE, 
+                data=data_train[i,], 
+                family=binomial(link="logit")
+                )
+summary(models[["Registrants"]])
+```
+
+
+
+
+## Save Objects
+
+```{r saveobjects}
+save(models, lst.smb, file = "predict.Rdata")
+```

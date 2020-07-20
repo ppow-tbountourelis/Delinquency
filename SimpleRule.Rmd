@@ -1,0 +1,75 @@
+---
+title: "A Rule-Based Scoring Model"
+output:
+  html_document:
+    number_sections: yes
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+This is an R Markdown document. 
+
+# Libraries
+
+```{r libraries, echo=TRUE,  warning=FALSE, message=FALSE}
+library(smbinning)
+library(InformationValue)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+set.seed = 1
+```
+
+# Read Data
+
+The training data are read from a view called "v_mart_delinquency_train" into a csv file.
+
+```{r pressure, echo=TRUE}
+data <- read.csv(file = "v_mart_delinquency_train.csv")
+data <- as.data.frame(unclass(data), stringsAsFactors=TRUE) # Make strings factors
+data$ORDER_DT_HOUR <- as.factor(data$ORDER_DT_HOUR)
+data$ORDER_DT_MONTH <- as.factor(data$ORDER_DT_MONTH)
+```
+
+# Creating Training Set
+
+```{r sss, echo=TRUE}
+data.train <- data
+```
+
+\pagebreak
+
+# Recursive Partitioning
+
+```{r dasas}
+tree <- rpart(formula = OUTCOME ~ TENURE_FIRSTORDER + VERIFIEDSALARY + TIME_BETWEEN_REG_FIRST, 
+              data = data.train, 
+              method = 'anova',
+              control = rpart.control(cp = 0.001)
+              )
+tree
+```
+
+# Plotting the Tree
+
+```{r plottree}
+rpart.plot(tree, cex=0.6)
+```
+
+
+# Losses per Leaf
+
+```{r testt}
+data.train$leaf <- predict(tree, df = data.train)
+data.train$loss <- data.train$ORIGINAL - data.train$APPLIED
+tbl <- aggregate(data.train$loss, by=list(data.train$leaf), FUN=sum)
+tbl$loss <- tbl$x
+tbl$prc <- tbl$loss / sum(tbl$loss)
+tbl
+```
