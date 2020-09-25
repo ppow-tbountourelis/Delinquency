@@ -1,0 +1,275 @@
+---
+title: "On the Prediction of Net Margin"
+output:
+  html_document:
+    number_sections: yes
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+This is an R Markdown document.
+
+# Libraries
+
+```{r libraries, echo=TRUE,  warning=FALSE, message=FALSE}
+source("db.R")
+library(smbinning)
+library(InformationValue)
+library(randomForest)
+library(tidyverse)
+set.seed = 1
+datapath = "C:/Users/tbountourelis/OneDrive - PURCHASING POWER, LLC/R Projects/Data/"
+```
+
+# Registrants
+
+## Read Data
+
+The training data are read from a view called "v_mart_delinquency_train" into a csv file.
+
+```{r data23, echo=TRUE}
+data <- read.csv(file = paste(datapath, "v_mart_delinquency_train.csv", sep = ""))
+data <- as.data.frame(unclass(data), stringsAsFactors=TRUE) # Make strings factors
+cols <- c("ORDER_DT_HOUR", "ORDER_DT_MONTH")
+data[, cols] <- lapply(data[, cols], factor)
+models <- list()
+```
+
+## Creating Training and Test sets
+
+Create train (70%) and testing (30%) tests. 
+
+```{r train324, echo=TRUE}
+# Create Training Data
+# Create Test Data
+input.train  <- sample(1:nrow(data), 0.7 * nrow(data))
+# 
+data.train <- data[input.train, ]  
+data.test  <- data[-input.train,] 
+```
+
+
+```{r model745834, echo=TRUE}
+models[["NetMargin-RF-Registrants"]] <- randomForest(NET_MARGIN_FWD_1YR_COL ~ WOE_USERGROUP +
+                                                                   WOE_BIN_DAYS_SINCE_REG +
+                                                                   WOE_BIN_CLIENT +
+                                                                   WOE_BIN_VERIFIEDSALARY +
+                                                                   WOE_BIN_TENURE
+                                                         , 
+                                                         data=data.train, 
+                                                         ntree=50, 
+                                                         mtry=2,
+                                                         importance=FALSE,
+                                                         proximity = FALSE,
+                                                         oob.prox = FALSE
+                                                         )
+
+
+
+model <- models[["NetMargin-RF-Registrants"]]
+
+data.test$score_nm_reg <- predict(model, 
+                                  data.test
+)
+```
+
+
+```{r plot34453ss, echo=TRUE}
+plot(sort(data.test$score_nm_reg))
+```
+
+
+```{r bins341986723ss, echo=TRUE}
+col <- "score_nm_reg"
+data.test$bins <- cut_number(x = data.test[, col], n = 5)
+
+data.test %>%
+group_by(bins)  %>%
+summarize(  Count = length(score_nm_reg),
+            Score = mean(round(score_nm_reg)),
+            Actual_NetMargin = 1 * mean(NET_MARGIN_FWD_1YR_COL),
+            Delinquency = mean(OUTCOME),
+            #FO = mean(FIRST_ORDER_ORIGINAL),
+            Net_Margin_1YR = mean(NET_MARGIN_FWD_1YR)
+            )
+
+```
+
+
+```{r bins341986723ss, echo=TRUE}
+# Read Data
+query <- 'select * from v_mart_delinquency_train3'
+data.pred <- exeQueryString (query, stringsAsFactors = TRUE)
+
+model <- models[["NetMargin-RF-Registrants"]]
+cols <- c("WOE_BIN_TENURE", "WOE_BIN_VERIFIEDSALARY", "WOE_BIN_CLIENT", "WOE_BIN_DAYS_SINCE_REG")
+data.pred[, cols] <- lapply(data.pred[, cols], factor)
+levels(data.pred$WOE_BIN_CLIENT)         <- model$forest$xlevels$WOE_BIN_CLIENT
+levels(data.pred$WOE_BIN_VERIFIEDSALARY) <- model$forest$xlevels$WOE_BIN_VERIFIEDSALARY
+levels(data.pred$WOE_BIN_TENURE)         <- model$forest$xlevels$WOE_BIN_TENURE
+levels(data.pred$WOE_BIN_DAYS_SINCE_REG) <- model$forest$xlevels$WOE_BIN_DAYS_SINCE_REG
+data.pred$score_nm_reg <- predict(model, 
+                                  data.pred
+)
+
+
+col <- "score_nm_reg"
+data.pred$bins <- cut_number(x = data.pred[, col], n = 5)
+
+
+
+table <- "v_mart_delinquency_train3_s"
+data.out <- data.pred[, c("ORDER_ID", "score_nm_reg")]
+
+
+
+con <- openCon()
+sqlDrop(channel = con, 
+        sqtable = table, 
+        errors = FALSE)
+sqlSave(channel = con, 
+        dat = data.out, 
+        tablename = table,
+        append   = FALSE,
+        rownames = FALSE, 
+        colnames = FALSE, 
+        verbose  = FALSE,
+        safer    = TRUE, 
+        addPK    = FALSE, 
+        fast     = TRUE, 
+        test     = FALSE, 
+        nastring = NULL
+)
+close(con)
+
+
+
+data.pred %>%
+group_by(bins)  %>%
+summarize(  Count = length(score_nm_reg),
+            Score = mean(round(score_nm_reg)),
+            Actual_NetMargin = 2 * mean(NET_MARGIN_FWD_1YR_COL),
+            Delinquency = mean(OUTCOME),
+            #FO = mean(FIRST_ORDER_ORIGINAL),
+            Net_Margin_1YR = mean(NET_MARGIN_FWD_1YR),
+            SALARY = median(VERIFIEDSALARY),
+            TENURE = mean(TENURE)
+            )
+```
+
+# One-Time Buyers
+
+## Read Data
+
+The training data are read from a view called "v_mart_delinquency_train2" into a csv file.
+
+```{r pressure, echo=TRUE}
+data <- read.csv(file = paste(datapath, "v_mart_delinquency_train2.csv", sep = ""))
+data <- as.data.frame(unclass(data), stringsAsFactors=TRUE) # Make strings factors
+cols <- c("ORDER_DT_HOUR", "ORDER_DT_MONTH", "CLIENT_ID_V2", "STATUS_ACTIVE")
+data[, cols] <- lapply(data[, cols], factor)
+```
+
+## Creating Training and Test sets
+
+Create train (70%) and testing (30%) tests. 
+
+```{r s41234ss, echo=TRUE}
+# Create Training Data
+# Create Test Data
+set.seed = 1
+input.train  <- sample(1:nrow(data), 0.7 * nrow(data))
+# 
+data.train <- data[input.train, ]  
+data.test  <- data[-input.train,] 
+```
+
+
+```{r s34678923ss, echo=TRUE}
+models[["NetMargin-RF-FTB"]] <- randomForest(NET_MARGIN_FWD_1YR_COL ~ WOE_USERGROUP +
+                                                                   WOE_BIN_DAYS_SINCE_REG +
+                                                                   WOE_BIN_CLIENT +
+                                                                   WOE_BIN_VERIFIEDSALARY +
+                                                                   WOE_BIN_TENURE +
+                                                                   STATUS_ACTIVE +
+                                                                   BALANCE
+                                                                   , 
+                                                                   data=data.train, 
+                                                                   ntree=50, 
+                                                                   mtry=2,
+                                                                   importance=FALSE,
+                                                                   proximity = FALSE,
+                                                                   oob.prox = FALSE
+                                                                   )
+
+
+
+model <- models[["NetMargin-RF-FTB"]]
+
+data.test$score_nm_ftb <- predict(model, 
+                              data.test
+)
+```
+
+
+```{r s34453ss, echo=TRUE}
+plot(sort(data.test$score_nm_ftb))
+```
+
+
+```{r s341986723ss, echo=TRUE}
+col <- "score_nm_ftb"
+data.test$bins <- cut_number(x = data.test[, col], n = 5)
+
+data.test %>%
+group_by(bins)  %>%
+summarize(  Count = length(score_nm_ftb),
+            Score = mean(round(score_nm_ftb)),
+            Actual_NetMargin = 1 * mean(NET_MARGIN_FWD_1YR_COL)
+            )
+
+
+```
+# Survival
+
+```{r survival341986723ss, echo=TRUE}
+data <- read.csv(file = paste(datapath, "v_mart_delinquency_buyers.csv", sep = ""))
+
+# Survival
+surv <- Surv(time  = data$OUTCOME_TIME, 
+             event = data$OUTCOME_CENSORED)
+cox <- coxph(surv ~ 1,
+             data = data)
+curve            <- basehaz(cox, centered=TRUE); names(curve) <- c("chaz", "time")
+curve$haz        <- c(curve$chaz[1], diff(curve$chaz))
+curve$conv_30    <- 1 - exp(-lead(curve$chaz, 30)) - (1 - exp(-lead(curve$chaz, 0)))
+curve$conv_60    <- 1 - exp(-lead(curve$chaz, 60)) - (1 - exp(-lead(curve$chaz, 0)))
+curve$conv_90    <- 1 - exp(-lead(curve$chaz, 90)) - (1 - exp(-lead(curve$chaz, 0)))
+
+conversion <- function(time)
+{
+  if(is.na(time)) {return (NA)}
+  if (time > 1000) (return (0.001))
+  i = which(curve$time == time)
+  return(curve[i,]$conv_90)
+}
+#data.pred$baseline_hazard <- sapply(data.pred$OUTCOME_TIME, conversion)
+#data.pred$risk            <- predict(cox, newdata = data.pred, type = 'risk')
+#data.pred$score_surv      <- data.pred$baseline_hazard * data.pred$risk
+
+```
+
+
+
+
+# Save Models
+
+```{r saveobjects}
+save(models, curve, file = paste(datapath, "model_NetMargin.Rdata", sep = ""))
+```

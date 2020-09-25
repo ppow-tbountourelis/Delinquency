@@ -1,0 +1,106 @@
+---
+title: "On the Prediction of Buyer Risk"
+output:
+  html_document:
+    number_sections: yes
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+This is an R Markdown document.
+
+# Libraries
+
+```{r libraries, echo=TRUE,  warning=FALSE, message=FALSE}
+source("db.R")
+library(smbinning)
+library(InformationValue)
+library(randomForest)
+set.seed = 1
+datapath = "C:/Users/tbountourelis/OneDrive - PURCHASING POWER, LLC/R Projects/Data/"
+models <- list()
+```
+
+# Read Data
+
+The training data are read from a view called "v_mart_delinquency_train" into a csv file.
+
+```{r pressure, echo=TRUE}
+data <- read.csv(file = paste(datapath, "v_mart_delinquency_train.csv", sep = ""))
+data <- as.data.frame(unclass(data), stringsAsFactors=TRUE) # Make strings factors
+cols <- c("ORDER_DT_HOUR", "ORDER_DT_MONTH", "CLIENT_ID_V2")
+data[, cols] <- lapply(data[, cols], factor)
+```
+
+# Creating Training and Test sets
+
+Create train (70%) and testing (30%) tests. 
+
+```{r sss, echo=TRUE}
+# Create Training Data
+input.ones <- data[which(data$OUTCOME == 1), ]  # all 1's
+input.zeros <-data[which(data$OUTCOME == 0), ]  # all 0's
+# Create Test Data
+input.ones.train.rows  <- sample(1:nrow(input.ones), 1 * nrow(input.ones))  # 1's for training
+input.zeros.train.rows <- sample(1:nrow(input.zeros), 1* nrow(input.zeros))  # 0's for training. Pick as many 0's as 1's
+# 
+training.ones  <- input.ones[input.ones.train.rows, ]  
+training.zeros <- input.zeros[input.zeros.train.rows, ]
+data.train <- rbind(training.ones, training.zeros) 
+# 
+test.ones  <- input.ones[-input.ones.train.rows, ]
+test.zeros <- input.zeros[-input.zeros.train.rows, ]
+data.test  <- rbind(test.ones, test.zeros)  
+```
+
+
+# A Risk Score for Buyers
+
+```{r IV127767531, echo=TRUE}
+i <- data.train$NEW_CHANNEL == 'Affiliate'
+models[["Registrants"]] <- glm(OUTCOME ~  WOE_USERGROUP +
+                                          WOE_BIN_DAYS_SINCE_REG +
+                                          WOE_BIN_CLIENT +
+                                          WOE_BIN_VERIFIEDSALARY +
+                                          WOE_BIN_TENURE, 
+                data=data.train[i,], 
+                family=binomial(link="logit")
+                )
+summary(models[["Registrants"]])
+```
+
+
+```{r IV127ewr767531, echo=TRUE}
+i <- data.train$NEW_CHANNEL == 'Affiliate'
+models[["Registrants - v2"]] <- glm(OUTCOME ~ VERIFIEDSALARY_SLAB_V2 +
+                                              TENURE_SLAB_V2 + 
+                                              VERIFIEDSALARY_SLAB_V2 * TENURE_SLAB_V2
+                                      , 
+                data=data.train[i,], 
+                family=binomial(link="logit")
+                )
+summary(models[["Registrants - v2"]])
+
+data.train$OUTCOME <- as.factor(data.train$OUTCOME)
+models[["Registrants - Bayes"]] <- naive_bayes(formula = OUTCOME ~ VERIFIEDSALARY_SLAB + TENURE_SLAB, data = data.train[i,])
+
+models[["Registrants - Bayes - v2"]] <- naive_bayes(formula = OUTCOME ~ VERIFIEDSALARY_SLAB_V2 + TENURE_SLAB_V2, data = data.train[i,], laplace = 0)
+
+i <- data.train$NEW_CHANNEL == 'Affiliate' & data.train$CLIENT_RISK_GROUP == 'High Risk'
+models[["Registrants - Bayes - High Risk"]] <- naive_bayes(formula = OUTCOME ~ VERIFIEDSALARY_SLAB_V2 + TENURE_SLAB_V2, data = data.train[i,], laplace = 0)
+
+i <- data.train$NEW_CHANNEL == 'Affiliate' & data.train$CLIENT_RISK_GROUP == 'Low Risk'
+models[["Registrants - Bayes - Low Risk"]] <- naive_bayes(formula = OUTCOME ~ VERIFIEDSALARY_SLAB_V2 + TENURE_SLAB_V2, data = data.train[i,], laplace = 0)
+```
+
+## Save Objects
+
+```{r saveobjects}
+save(models, file = paste(datapath, "model_Buyers.Rdata", sep = ""))
+```
